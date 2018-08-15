@@ -1,0 +1,33 @@
+region: test.geojson
+model: imodflow
+version: 0.1
+hydro-engine:
+  defaults:
+    type: raster
+    source: earth-engine
+    resample: median
+    cell_size: 1000.0
+    region_filter: region
+    catchment_level: 2
+  
+  datasets:
+    -
+      variable: dem
+      path: download/dem.tif
+      
+local:
+  datasets:
+    land: data/natural_earth/ne_50m_land.geojson
+    lakes: data/natural_earth/ne_50m_lakes.geojson
+    rivers: data/natural_earth/ne_rivers_lakes_centerlines.geojson
+    soilgrids-depth: data/SoilGrids/BDTICM_M_1km_ll.tif
+    sediment-thickness: data/Global_Soil_Regolith_Sediment_1304/data/average_soil_and_sedimentary-deposit_thickness.tif 
+    
+  
+...
+---
+
+cellsize: 1000.0
+crs: UTM
+modelname: testing
+steady_transient: steady
