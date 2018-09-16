@@ -1,8 +1,21 @@
 %YAML 1.2
 ---
 model: imodflow 
-region: test.geojson
 version: 1.0
+
+hydro-engine:
+  defaults:
+    function: get-raster
+    source: earth-engine
+    resample: median
+    crs: UTM
+    cell_size: 1000.0
+    region_filter: region
+    catchment_level: 6
+  datasets:
+    -
+      variable: dem
+      path: download/dem.tif
 
 local:
   defaults:
@@ -10,37 +23,40 @@ local:
     resample: median
     crs: UTM
     cell_size: 1000.0
-    path: generated
   datasets:
     -
       variable: soilgrids-thickness
       source: data/SoilGrids/BDTICM_M_1km_ll.tif
       function: get-raster
+      path: download/soilgrids_thickness.tif
     -
       variable: sediment-thickness
       source: data/Global_Soil_Regolith_Sediment_1304/data/average_soil_and_sedimentary-deposit_thickness.tif 
       function: get-raster
+      path: download/sediment_thickness.tif
     -
       variable: land
       source: data/Global_LSIB_Polygons_Detailed/Global_LSIB_Polygons_Detailed.shp
-      function: get-features
+      path: download/land.shp
     -
       variable: rivers
       source: data/RiverBankfullWidthDepth/rivers.shp
-      function: get-features
+      path: download/rivers.shp
     - 
       variable: aquifer-conductivity
-      source: data/GHLYMPS2.0/GHLYMPS2.0_WGS84.shp
-      function: get-features
+      source: data/GHLYMPS2.0/GLHYMPS_WGS84.shp
+      path: download/aquifer_conductivity.shp
     -
       variable: ate-thickness 
       source: data/ATE_all_cross_sec_pts/all_cross_section_points.shp
-      function: get-features
+      path: download/ate_thickness.shp
     -
       variable: ate-mask 
-      source: data/ATE_all_cross_sec_pts/buffered_mask.shp
-      function: get-features
+      source: data/ATE_all_cross_sec_pts/ate_mask.shp
+      path: download/ate_mask.shp
 
+region: test.geojson
+   
 ...
 ---
 

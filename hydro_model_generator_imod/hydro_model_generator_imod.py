@@ -3,20 +3,20 @@ import shutil
 import subprocess
 import zipfile
 from pathlib import Path
-
-import geojson
 import geopandas as gpd
 import imod
+import json
 import numpy as np
 import pyproj
-import rasterio
+import rasterio.features
 import shapely
 import shapely.geometry as sg
 import scipy.interpolate
 import scipy.ndimage
 import scipy.spatial
+import scipy.signal
+import skimage.morphology
 import xarray as xr
-
 from collections import OrderedDict
 from hydro_model_builder.model_generator import ModelGenerator
 
@@ -40,7 +40,6 @@ class ModelGeneratorImodflow(ModelGenerator):
     def generate_model(self, general_options, options):
 
         build_model(
-            general_options["region"],
             options["cellsize"],
             options["modelname"],
             options["steady_transient"],
@@ -48,41 +47,52 @@ class ModelGeneratorImodflow(ModelGenerator):
         )
 
 
-def build_model(geojson_path, cellsize, name, steady_transient, general_options):
+def load_region(region):
+    if isinstance(region, dict):
+        out = sg.shape(region)
+    else:
+        with open(region) as f:
+            js = json.load(f)
+        assert (
+            len(js["features"]) == 1
+        ), "Region definition should contain only one feature."
+        out = sg.shape(js["features"][0]["geometry"])
+    return out
+
+
+def build_model(cellsize, name, steady_transient, general_options):
     """
     Builds and spits out an iMODFLOW groundwater model.
     """
     paths = get_paths(general_options)
 
-    dem = xr.open_rasterio(paths["dem"]).squeeze("band")
-    soilgrids_thickness = xr.open_rasterio(paths["soilgrids-thickness"]).squeeze("band")
-    sediment_thickness = xr.open_rasterio(paths["sediment-thickness"]).squeeze("band")
+    region = load_region(general_options["region"])
+    dem = xr.open_rasterio(paths["dem"]).squeeze("band").drop("band")
+    soilgrids_thickness = (
+        xr.open_rasterio(paths["soilgrids-thickness"]).squeeze("band").drop("band")
+    )
+    sediment_thickness = (
+        xr.open_rasterio(paths["sediment-thickness"]).squeeze("band").drop("band")
+    )
     ate_points = gpd.read_file(paths["ate-thickness"])
     ate_mask = gpd.read_file(paths["ate-mask"])
     river_lines = gpd.read_file(paths["rivers"])
     land_polygons = gpd.read_file(paths["land"])
-    region = sg.Polygon(geojson.read(geojson_path))
-    
-    land = rasterize(
-        shapes=land_polygons.geometry,
-        like=dem,
-    )
-    is_land = ~np.isnan(land)
 
-    region_raster = rasterize(
-        shapes=region,
-        like=dem,
+    # model domains
+    # TODO: support polygons, not just squares
+    is_region = rasterize(shapes=region, like=dem).fillna(1) > 0
+    is_land = rasterize(shapes=land_polygons.geometry, like=dem).where(is_region) > 0
+    is_sea = (
+        xr.full_like(is_land, scipy.ndimage.morphology.binary_dilation(is_land))
+        ^ is_land
     )
-    is_region = ~np.isnan(region_raster)
+    is_bnd = is_land | is_sea
 
-    ate_grid = ate_points_to_grid(ate_points, ate_mask, "sed_thickness_1", dem)
+    # parameter values
+    ate_grid = ate_points_to_grid(ate_points, ate_mask, "sed_thic_1", dem)
     top, bot = tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_grid)
-
-    bnd = xr.full_like(top, 1.0)
-    bnd = bnd.where(~np.isnan(top))
-    bnd = bnd.where(is_land)
-    bnd = bnd.where(is_region)
-    is_bnd = bnd.where(~np.isnan(bnd))
+    bnd = xr.full_like(top, is_bnd).fillna(0.0)
 
     conductivity_polygons = gpd.read_file(paths["aquifer-conductivity"])
     khv, kvv = conductivity(conductivity_polygons, "logK_Ice_x", bnd)
@@ -97,26 +107,30 @@ def build_model(geojson_path, cellsize, name, steady_transient, general_options)
         river_lines, "a_WIDTH", "a_DEPTH", dem
     )
 
-    # gather model data
+    ghb_cond, ghb_head = ghb_sea(is_sea, cellsize, bnd)
+
+    # gather model data, filter the right parts
     model = OrderedDict()
     model["bnd"] = bnd
-    model["shd"] = shd
-    model["khv"] = khv
-    model["kvv"] = kvv
-    model["top"] = top
-    model["bot"] = bot
-    model["rch"] = rch
-    model["shd"] = shd
-    model["drn-bot"] = drn_bot
-    model["drn-cond"] = drn_cond
-    model["riv-cond"] = riv_cond
-    model["riv-stage"] = riv_stage
-    model["riv-bot"] = riv_bot
-    model["riv-inff"] = riv_inff
+    model["shd"] = shd.where(is_bnd)
+    model["khv"] = fill_da(khv).where(is_bnd)
+    model["kvv"] = fill_da(kvv).where(is_bnd)
+    model["top"] = fill_da(top.where(is_land)).where(is_bnd)
+    model["bot"] = fill_da(bot.where(is_land)).where(is_bnd)
+    model["rch"] = rch.where(is_land)
+    model["shd"] = shd.where(is_bnd)
+    model["drn-bot"] = drn_bot.where(is_land)
+    model["drn-cond"] = drn_cond.where(is_land)
+    model["riv-cond"] = riv_cond.where(is_land)
+    model["riv-stage"] = riv_stage.where(is_land)
+    model["riv-bot"] = riv_bot.where(is_land)
+    model["riv-inff"] = riv_inff.where(is_land)
+    model["ghb-cond"] = ghb_cond
+    model["ghb-head"] = ghb_head
 
-    # discard all values outside of bnd
     for k, v in model.items():
-        model[k] = v.where(is_bnd)
+        if "layer" not in v.dims:
+            model[k] = v.assign_coords(layer=1)
 
     imod.write(path=name, model=model, name=name)
 
@@ -127,6 +141,12 @@ def rasterize(shapes, like, fill=np.nan, kwargs={}):
     xarray coordinates.
     """
 
+    # shapes must be an iterable
+    try:
+        iter(shapes)
+    except TypeError:
+        shapes = (shapes,)
+
     raster = rasterio.features.rasterize(
         shapes,
         out_shape=like.shape,
@@ -136,6 +156,52 @@ def rasterize(shapes, like, fill=np.nan, kwargs={}):
     )
 
     return xr.DataArray(raster, like.coords, like.dims)
+
+
+def _fill_np(data, invalid):
+    """Basic nearest neighbour interpolation"""
+    # see: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array
+    ind = scipy.ndimage.distance_transform_edt(
+        invalid, return_distances=False, return_indices=True
+    )
+    return data[tuple(ind)]
+
+
+def fill_da(da, invalid=None):
+    """
+    Replace the value of invalid `da` cells (indicated by `invalid`)
+    using basic nearest neighbour interpolation.
+
+    Parameters
+    ----------
+    da: xr.DataArray with gaps
+        array containing missing value
+        if one of the dimensions is layer, it will interpolate one layer at a
+        a time (2D interpolation over x and y in case of dims == (y, x, layer)).
+
+    invalid: xr.DataArray
+        a binary array of same shape as `da`.
+        data value are replaced where invalid is True
+        If None (default), uses: `invalid = np.isnan(data)`
+
+    Returns
+    -------
+    xarray.DataArray
+        with the same coordinates as the input. 
+    """
+
+    out = xr.full_like(da, np.nan)
+    if invalid is None:
+        invalid = np.isnan(da)
+    if "layer" in da.dims:
+        for layer in da["layer"]:
+            out.sel(layer=layer)[...] = _fill_np(
+                da.sel(layer=layer).values, invalid.sel(layer=layer).values
+            )
+    else:
+        out.values = _fill_np(da.values, invalid.values)
+
+    return out
 
 
 def ate_points_to_grid(ate_points, ate_area, column, like):
@@ -167,7 +233,9 @@ def ate_points_to_grid(ate_points, ate_area, column, like):
     triangle = scipy.signal.triang(triangle_size)
     kernel_x, kernel_y = np.meshgrid(triangle, triangle)
     kernel = (kernel_x + kernel_y) / 2.0
-    smoothed = scipy.ndimage.convolve(interpolated, kernel / kernel.sum())
+    smoothed = xr.full_like(
+        like, scipy.ndimage.convolve(interpolated, kernel / kernel.sum())
+    )
     ate_valid = rasterize(ate_area.geometry, like)
     smoothed_grid = smoothed.where(ate_valid)
     return smoothed_grid
@@ -199,7 +267,7 @@ def tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_thickness):
     """
 
     thickness = xr.concat(
-        [ate_thickness, soilgrids_thickness, sediment_thickness], dim="layer"
+        [ate_thickness, soilgrids_thickness / 100.0, sediment_thickness], dim="layer"
     ).max("layer")
     topL1 = dem.copy()
     topL1 = topL1.assign_coords(layer=1)
@@ -216,7 +284,9 @@ def tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_thickness):
 
 def conductivity(conductivity_polygons, column, like):
     # from log m/s to m/d
-    conductivity_polygons["khv"] = 10 ** (conductivity_polygons[column] / 100) * 1.0e7
+    conductivity_polygons["khv"] = (
+        10.0 ** (conductivity_polygons[column] / 100.0) * 1.0e7 * 24 * 3600.0
+    )
     khv = xr.full_like(like, 10.0)
     khv.sel(layer=1)[...] = rasterize(
         shapes=(
@@ -225,9 +295,9 @@ def conductivity(conductivity_polygons, column, like):
                 conductivity_polygons.geometry, conductivity_polygons["khv"]
             )
         ),
-        like=like,
+        like=like.sel(layer=1),
     )
-    kvv = 0.3 * khv.sel(layer=1) 
+    kvv = 0.3 * khv.sel(layer=1)
     return khv, kvv
 
 
@@ -298,12 +368,15 @@ def rivers(rivers_lines, width_column, depth_column, dem):
     buffered = []
     for _, row in rivers_lines.iterrows():
         width = row[width_column]
-        row = row.geometry.buffer(width / 2.0)
+        row.geometry = row.geometry.buffer(width / 2.0)
         buffered.append(row)
     rivers_polygons = gpd.GeoDataFrame(buffered)
 
     # intersection
     gridshape = raster_to_features(dem)
+    # TODO: probably replace by writing to shapefile
+    # then call org2ogr intersect instead
+    # since this requires geopandas-cython to perform acceptably.
     river_cells = gpd.overlay(rivers_polygons, gridshape, how="intersection")
 
     centroids = gpd.GeoDataFrame()
@@ -318,12 +391,17 @@ def rivers(rivers_lines, width_column, depth_column, dem):
     centroids["yi"] = coordinate_index(centroids["y"].values, ymin, ymax, dy)
 
     # fill in outgoing grids
-    nrow, ncol = dem.x.size, dem.y.size
+    nrow, ncol = dem.y.size, dem.x.size
     area = np.full((nrow, ncol), 0.0)
+
+    # ensure it's within raster area
+    centroids = centroids[(centroids["yi"] >= 0) & (centroids["yi"] < nrow)]
+    centroids = centroids[(centroids["xi"] >= 0) & (centroids["xi"] < ncol)]
+
     # for area weighted depth
     depth_x_area = np.full((nrow, ncol), 0.0)
     for i, j, a, d in zip(
-        centroids["yi"], centroids["xi"], centroids["area"], centroids["depths"]
+        centroids["yi"], centroids["xi"], centroids["area"], centroids["depth"]
     ):
         area[i, j] += a
         depth_x_area[i, j] += a * d
@@ -344,3 +422,11 @@ def rivers(rivers_lines, width_column, depth_column, dem):
 
     return conductance, stage, bottom, infiltration_factor
 
+
+def ghb_sea(is_sea, cellsize, bnd):
+    seabed_resistance = 100.0  # TODO
+    ghb_cond = xr.full_like(bnd, (cellsize * cellsize) / seabed_resistance).where(
+        is_sea
+    )
+    ghb_head = xr.full_like(bnd, 0.0).where(is_sea)
+    return ghb_cond, ghb_head
