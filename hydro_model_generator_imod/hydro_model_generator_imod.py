@@ -1,72 +1,35 @@
+import json
 import os
 import shutil
 import subprocess
 import zipfile
+from collections import OrderedDict
 from pathlib import Path
+
 import geopandas as gpd
 import imod
-import json
 import numpy as np
 import pyproj
 import rasterio.features
-import shapely
-import shapely.geometry as sg
 import scipy.interpolate
 import scipy.ndimage
-import scipy.spatial
 import scipy.signal
+import scipy.spatial
+import shapely
+import shapely.geometry as sg
 import skimage.morphology
 import xarray as xr
-from collections import OrderedDict
-from hydro_model_builder.model_generator import ModelGenerator
 
-
-def get_paths(general_options):
-    # TODO: use schema to validate here?
-    d = {}
-    if "hydro-engine" in general_options:
-        for var in general_options["hydro-engine"]["datasets"]:
-            d[var["variable"]] = var["path"]
-    if "local" in general_options:
-        for var in general_options["local"]["datasets"]:
-            d[var["variable"]] = var["path"]
-    return d
-
-
-class ModelGeneratorImodflow(ModelGenerator):
-    def __init__(self):
-        super(ModelGeneratorImodflow, self).__init__()
-
-    def generate_model(self, general_options, options):
-
-        build_model(
-            options["cellsize"],
-            options["modelname"],
-            options["steady_transient"],
-            general_options,
-        )
-
-
-def load_region(region):
-    if isinstance(region, dict):
-        out = sg.shape(region)
-    else:
-        with open(region) as f:
-            js = json.load(f)
-        assert (
-            len(js["features"]) == 1
-        ), "Region definition should contain only one feature."
-        out = sg.shape(js["features"][0]["geometry"])
-    return out
+import model_builder
 
 
 def build_model(cellsize, name, steady_transient, general_options):
     """
     Builds and spits out an iMODFLOW groundwater model.
     """
-    paths = get_paths(general_options)
+    paths = model_builder.get_paths(general_options)
 
-    region = load_region(general_options["region"])
+    region = model_builder.load_region(general_options["region"])
     dem = xr.open_rasterio(paths["dem"]).squeeze("band").drop("band")
     soilgrids_thickness = (
         xr.open_rasterio(paths["soilgrids-thickness"]).squeeze("band").drop("band")

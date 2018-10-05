@@ -1,8 +1,5 @@
 %YAML 1.2
 ---
-model: imodflow 
-version: 1.0
-
 hydro-engine:
   defaults:
     function: get-raster
