@@ -58,6 +58,5 @@ region: test.geojson
 ---
 
 cellsize: 1000.0
-crs: UTM
 modelname: testing
 steady_transient: steady

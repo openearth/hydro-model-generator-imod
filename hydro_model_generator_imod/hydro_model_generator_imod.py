@@ -20,7 +20,7 @@ import shapely.geometry as sg
 import skimage.morphology
 import xarray as xr
 
-import model_builder
+from hydro_model_builder import model_builder
 
 
 def build_model(cellsize, name, steady_transient, general_options):
@@ -29,18 +29,24 @@ def build_model(cellsize, name, steady_transient, general_options):
     """
     paths = model_builder.get_paths(general_options)
 
-    region = model_builder.load_region(general_options["region"])
-    dem = xr.open_rasterio(paths["dem"]).squeeze("band").drop("band")
+    region = model_builder.shapely_region(general_options["region"])
+    # .compute() is a workaround for xarray bug:
+    # fixed with next xarray release: https://github.com/pydata/xarray/issues/2454
+    dem = xr.open_rasterio(paths["dem"]).squeeze("band", drop=True).compute()
     soilgrids_thickness = (
-        xr.open_rasterio(paths["soilgrids-thickness"]).squeeze("band").drop("band")
+        xr.open_rasterio(paths["thickness-SoilGrids"])
+        .squeeze("band", drop=True)
+        .compute()
     )
     sediment_thickness = (
-        xr.open_rasterio(paths["sediment-thickness"]).squeeze("band").drop("band")
+        xr.open_rasterio(paths["thickness-NASA"]).squeeze("band", drop=True).compute()
     )
-    ate_points = gpd.read_file(paths["ate-thickness"])
-    ate_mask = gpd.read_file(paths["ate-mask"])
-    river_lines = gpd.read_file(paths["rivers"])
-    land_polygons = gpd.read_file(paths["land"])
+
+    crs = model_builder.utm_epsg(general_options["crs"])
+    ate_points = gpd.read_file(paths["ate-thickness"]).to_crs(crs)
+    ate_mask = gpd.read_file(paths["ate-mask"]).to_crs(crs)
+    river_lines = gpd.read_file(paths["rivers"]).to_crs(crs)
+    land_polygons = gpd.read_file(paths["land"]).to_crs(crs)
 
     # model domains
     # TODO: support polygons, not just squares
@@ -57,7 +63,7 @@ def build_model(cellsize, name, steady_transient, general_options):
     top, bot = tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_grid)
     bnd = xr.full_like(top, is_bnd).fillna(0.0)
 
-    conductivity_polygons = gpd.read_file(paths["aquifer-conductivity"])
+    conductivity_polygons = gpd.read_file(paths["aquifer-conductivity"]).to_crs(crs)
     khv, kvv = conductivity(conductivity_polygons, "logK_Ice_x", bnd)
 
     drn_bot, drn_cond = drainage(dem, cellsize)
@@ -150,7 +156,7 @@ def fill_da(da, invalid=None):
     Returns
     -------
     xarray.DataArray
-        with the same coordinates as the input. 
+        with the same coordinates as the input.
     """
 
     out = xr.full_like(da, np.nan)
@@ -169,7 +175,7 @@ def fill_da(da, invalid=None):
 
 def ate_points_to_grid(ate_points, ate_area, column, like):
     """
-    Smoothes ate_estimate using convolution, triangular kernel, 
+    Smoothes ate_estimate using convolution, triangular kernel,
     with 20% of total extent.
 
     Parameters
@@ -177,7 +183,7 @@ def ate_points_to_grid(ate_points, ate_area, column, like):
     ate_points : geopandas.GeoDataFrame
         Aquifer Thickness Estimate from Zamrsky et al.
 
-    Returns 
+    Returns
     -------
     xarray.DataArray
     """
@@ -214,15 +220,15 @@ def tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_thickness):
 
     Parameters
     ----------
-    dem : xarray.DataArray 
+    dem : xarray.DataArray
         digital elevation model
-    soilgrids_thickness : xarray.DataArray 
+    soilgrids_thickness : xarray.DataArray
         thickness from soilgrids estimation
-    sediment_thickness : xarray.DataArray 
+    sediment_thickness : xarray.DataArray
         thickness from NASA estimation
     ate_thickness : xarray.DataArray
         Aquifer Thickness Estimate, gridded
-    
+
     Returns
     -------
     top : xr.DataArray

@@ -1,0 +1,60 @@
+%YAML 1.2
+---
+hydro-engine:
+  defaults:
+    function: get-raster
+    source: earth-engine
+    resample: median
+    crs: UTM
+    cell_size: 1000.0
+    region_filter: region
+    catchment_level: 6
+  datasets:
+    -
+      variable: dem
+      path: download/dem.tif
+    -
+      variable: thickness-NASA
+      path: download/thickness_NASA.tif
+    -
+      variable: thickness-SoilGrids
+      path: download/thickness_soilgrids.tif
+    -
+      variable: ate-mask
+      source: users/huite/CoastalUnconsolidatedAquiferArea
+      function: get-features
+      path: download/ate-mask.json
+    -
+      variable: land
+      source: USDOS/LSIB_SIMPLE/2017
+      function: get-features
+      path: download/land.json
+    -
+      variable: rivers
+      source: users/huite/RiverBankfullWidthDepth
+      function: get-features
+      path: download/rivers.json
+    -
+      variable: aquifer-conductivity
+      source: users/huite/GLHYMPS_2
+      function: get-features
+      path: download/aquifer_conductivity.json
+    -
+      variable: ate-thickness
+      source: users/huite/CoastalUnconsolidatedAquiferThickness
+      function: get-features
+      path: download/ate_thickness.json
+    -
+      variable: ate-mask
+      source: data/ATE_all_cross_sec_pts/ate_mask.json
+      function: get-features
+      path: download/ate_mask.json
+
+region: test.geojson
+
+...
+---
+
+cellsize: 1000.0
+modelname: testing
+steady_transient: steady
