@@ -22,13 +22,13 @@ def main():
 )
 def generate_model(options_file, results_dir, skip_download):
     # two YAML docs are expected in this file, one generic and one model specific
-    genopt, modopt = model_builder.parse_config(options_file)
+    general_options, model_options = model_builder.parse_config(options_file)
     msg = f"Going to create an imodflow model, it will be placed in '{results_dir}'"
     print(msg)
     if not skip_download:
-        model_builder.general_options(genopt)
+        model_builder.fetch_data(general_options)
 
-    hydro_model_generator_imod.build_model(**modopt, general_options=genopt)
+    hydro_model_generator_imod.model_generator.build_model(**model_options, general_options=general_options)
 
 
 main.add_command(generate_model)

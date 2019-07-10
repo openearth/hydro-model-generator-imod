@@ -7,7 +7,6 @@ from collections import OrderedDict
 from pathlib import Path
 
 import geopandas as gpd
-import imod
 import numpy as np
 import pyproj
 import rasterio.features
@@ -20,33 +19,56 @@ import shapely.geometry as sg
 import skimage.morphology
 import xarray as xr
 
+import imod
 from hydro_model_builder import model_builder
 
 
-def build_model(cellsize, name, steady_transient, general_options):
+def rasterize(shapes, like, fill=np.nan, kwargs={}):
+    """
+    Rasterize a list of (geometry, fill_value) tuples onto the given
+    xarray coordinates.
+    """
+
+    # shapes must be an iterable
+    try:
+        iter(shapes)
+    except TypeError:
+        shapes = (shapes,)
+
+    raster = rasterio.features.rasterize(
+        shapes,
+        out_shape=like.shape,
+        fill=fill,
+        transform=imod.util.transform(like),
+        **kwargs,
+    )
+
+    return xr.DataArray(raster, like.coords, like.dims)
+
+
+def build_model(cellsize, modelname, steady_transient, general_options):
     """
     Builds and spits out an iMODFLOW groundwater model.
     """
     paths = model_builder.get_paths(general_options)
 
+    # Generate window of model extent
     region = model_builder.shapely_region(general_options["region"])
-    # .compute() is a workaround for xarray bug:
-    # fixed with next xarray release: https://github.com/pydata/xarray/issues/2454
-    dem = xr.open_rasterio(paths["dem"]).squeeze("band", drop=True).compute()
+
+    # Start loading the data from a local location
+    dem = xr.open_rasterio(paths["dem"]).squeeze("band", drop=True)
     soilgrids_thickness = (
         xr.open_rasterio(paths["thickness-SoilGrids"])
         .squeeze("band", drop=True)
         .compute()
     )
-    sediment_thickness = (
-        xr.open_rasterio(paths["thickness-NASA"]).squeeze("band", drop=True).compute()
+    sediment_thickness = xr.open_rasterio(paths["thickness-NASA"]).squeeze(
+        "band", drop=True
     )
 
-    crs = model_builder.utm_epsg(general_options["crs"])
-    ate_points = gpd.read_file(paths["ate-thickness"]).to_crs(crs)
-    ate_mask = gpd.read_file(paths["ate-mask"]).to_crs(crs)
-    river_lines = gpd.read_file(paths["rivers"]).to_crs(crs)
-    land_polygons = gpd.read_file(paths["land"]).to_crs(crs)
+    crs = {"init": f"epsg:{model_builder.utm_epsg(region=region)}"}
+    river_lines = gpd.read_file(paths["rivers"]).to_crs(crs=crs)
+    land_polygons = gpd.read_file(paths["land"]).to_crs(crs=crs)
 
     # model domains
     # TODO: support polygons, not just squares
@@ -59,12 +81,11 @@ def build_model(cellsize, name, steady_transient, general_options):
     is_bnd = is_land | is_sea
 
     # parameter values
-    ate_grid = ate_points_to_grid(ate_points, ate_mask, "sed_thic_1", dem)
-    top, bot = tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_grid)
+    top, bot = tops_bottoms(dem, soilgrids_thickness, sediment_thickness)
     bnd = xr.full_like(top, is_bnd).fillna(0.0)
 
-    conductivity_polygons = gpd.read_file(paths["aquifer-conductivity"]).to_crs(crs)
-    khv, kvv = conductivity(conductivity_polygons, "logK_Ice_x", bnd)
+    khv = xr.full_like(bnd, 10.0)
+    kvv = xr.full_like(bnd, 3.0)
 
     drn_bot, drn_cond = drainage(dem, cellsize)
 
@@ -101,30 +122,7 @@ def build_model(cellsize, name, steady_transient, general_options):
         if "layer" not in v.dims:
             model[k] = v.assign_coords(layer=1)
 
-    imod.write(path=name, model=model, name=name)
-
-
-def rasterize(shapes, like, fill=np.nan, kwargs={}):
-    """
-    Rasterize a list of (geometry, fill_value) tuples onto the given
-    xarray coordinates.
-    """
-
-    # shapes must be an iterable
-    try:
-        iter(shapes)
-    except TypeError:
-        shapes = (shapes,)
-
-    raster = rasterio.features.rasterize(
-        shapes,
-        out_shape=like.shape,
-        fill=fill,
-        transform=imod.util.transform(like),
-        **kwargs,
-    )
-
-    return xr.DataArray(raster, like.coords, like.dims)
+    imod.write(path=modelname, model=model, name=modelname)
 
 
 def _fill_np(data, invalid):
@@ -210,7 +208,7 @@ def ate_points_to_grid(ate_points, ate_area, column, like):
     return smoothed_grid
 
 
-def tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_thickness):
+def tops_bottoms(dem, soilgrids_thickness, sediment_thickness):
     """
     Creates two aquifer layer geometry (extent, thickness) from parameters.
 
@@ -235,8 +233,9 @@ def tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_thickness):
     bot : xr.DataArray
     """
 
+    # TODO: standardize to meters
     thickness = xr.concat(
-        [ate_thickness, soilgrids_thickness / 100.0, sediment_thickness], dim="layer"
+        [soilgrids_thickness / 100.0, sediment_thickness], dim="layer"
     ).max("layer")
     topL1 = dem.copy()
     topL1 = topL1.assign_coords(layer=1)
@@ -278,7 +277,7 @@ def drainage(dem, cellsize):
 
 
 def recharge(like):
-    # assumes 1.0 mm/d recharge
+    # TODO: assumes 1.0 mm/d recharge
     rch = xr.full_like(like, 1.0)
     return rch
 

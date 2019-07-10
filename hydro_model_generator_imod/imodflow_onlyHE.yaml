@@ -34,21 +34,6 @@ hydro-engine:
       source: users/huite/RiverBankfullWidthDepth
       function: get-features
       path: download/rivers.json
-    -
-      variable: aquifer-conductivity
-      source: users/huite/GLHYMPS_2
-      function: get-features
-      path: download/aquifer_conductivity.json
-    -
-      variable: ate-thickness
-      source: users/huite/CoastalUnconsolidatedAquiferThickness
-      function: get-features
-      path: download/ate_thickness.json
-    -
-      variable: ate-mask
-      source: data/ATE_all_cross_sec_pts/ate_mask.json
-      function: get-features
-      path: download/ate_mask.json
 
 region: test.geojson
 
