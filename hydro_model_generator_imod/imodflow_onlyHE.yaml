@@ -1,5 +1,7 @@
 %YAML 1.2
 ---
+model: imod
+version: 1.0
 hydro-engine:
   defaults:
     function: get-raster
@@ -12,34 +14,36 @@ hydro-engine:
   datasets:
     -
       variable: dem
-      path: download/dem.tif
+      path: hydro-engine/dem.tif
     -
       variable: thickness-NASA
-      path: download/thickness_NASA.tif
+      path: hydro-engine/thickness_NASA.tif
     -
       variable: thickness-SoilGrids
-      path: download/thickness_soilgrids.tif
+      path: hydro-engine/thickness_soilgrids.tif
     -
       variable: ate-mask
       source: users/huite/CoastalUnconsolidatedAquiferArea
       function: get-features
-      path: download/ate-mask.json
+      path: hydro-engine/ate-mask.json
     -
       variable: land
       source: USDOS/LSIB_SIMPLE/2017
       function: get-features
-      path: download/land.json
+      path: hydro-engine/land.json
     -
       variable: rivers
       source: users/huite/RiverBankfullWidthDepth
       function: get-features
-      path: download/rivers.json
+      path: hydro-engine/rivers.json
 
-region: test.geojson
+# region: test.geojson
+region: {"type":"Polygon","coordinates": [[[6.723632812499999,53.396432127095984],[14.04052734375,53.396432127095984],[14.04052734375,57.75107598132104],[6.723632812499999,57.75107598132104],[6.723632812499999,53.396432127095984]]]}
+# region: {"type":"Point","coordinates":[4.37255859375,51.549751017014195]}
 
 ...
 ---
 
 cellsize: 1000.0
-modelname: testing
+modelname: iMOD
 steady_transient: steady
