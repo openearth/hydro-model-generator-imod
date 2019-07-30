@@ -11,7 +11,14 @@ RUN cd / && git clone --recursive 'https://github.com/openearth/hydro-earth' \
 #     && pip3 install psq
 
 # Install hydro-engine
-RUN cd /app/hydro_model_generator_imod && git clone 'https://github.com/openearth/hydro-engine'
+RUN cd /app/hydro_model_generator_imod \
+    && git clone 'https://github.com/openearth/hydro-engine'
+
+# Install hydro-model-builder
+RUN apt install -y python3-rtree
+RUN cd /app/hydro_model_generator_imod \
+    && git clone -b refactor --single-branch https://github.com/openearth/hydro-model-builder.git \
+    && cd hydro-model-builder && python3 setup.py install && cd ..
 
 ENV DATASTORE_PROJECT_ID hydro-earth
 # Need to copy over private file
