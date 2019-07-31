@@ -102,6 +102,8 @@ def delete_output_files(input_dir):
             os.remove(os.path.join(origfolder, item))
         if item.endswith(".json"):
             os.remove(os.path.join(origfolder, item))
+        if item.endswith(".geojson"):
+            os.remove(os.path.join(origfolder, item))
     # pass
 
 def main():
