@@ -14,31 +14,31 @@ hydro-engine:
   datasets:
     -
       variable: dem
-      path: hydro-engine/dem.tif
+      path: hydro-engine/iMOD/dem.tif
     -
       variable: thickness-NASA
-      path: hydro-engine/thickness_NASA.tif
+      path: hydro-engine/iMOD/thickness_NASA.tif
     -
       variable: thickness-SoilGrids
-      path: hydro-engine/thickness_soilgrids.tif
+      path: hydro-engine/iMOD/thickness_soilgrids.tif
     -
       variable: ate-mask
       source: users/huite/CoastalUnconsolidatedAquiferArea
       function: get-features
-      path: hydro-engine/ate-mask.json
+      path: hydro-engine/iMOD/ate-mask.json
     -
       variable: land
       source: USDOS/LSIB_SIMPLE/2017
       function: get-features
-      path: hydro-engine/land.json
+      path: hydro-engine/iMOD/land.json
     -
       variable: rivers
       source: users/huite/RiverBankfullWidthDepth
       function: get-features
-      path: hydro-engine/rivers.json
+      path: hydro-engine/iMOD/rivers.json
 
 # region: test.geojson
-region: {"type":"Polygon","coordinates": [[[3.886,51.623],[4.803,51.623],[4.803,52.050],[3.886,52.050],[3.886,51.623]]]}
+region: {"type":"Polygon","coordinates": [[[6.723632812499999,53.396432127095984],[14.04052734375,53.396432127095984],[14.04052734375,57.75107598132104],[6.723632812499999,57.75107598132104],[6.723632812499999,53.396432127095984]]]}
 # region: {"type":"Point","coordinates":[4.37255859375,51.549751017014195]}
 
 ...
