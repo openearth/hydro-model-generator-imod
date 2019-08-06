@@ -46,11 +46,14 @@ def rasterize(shapes, like, fill=np.nan, kwargs={}):
     return xr.DataArray(raster, like.coords, like.dims)
 
 
-def build_model(cellsize, modelname, steady_transient, general_options):
+def build_model(cellsize, modelname, steady_transient, general_options, model_id):
     """
     Builds and spits out an iMODFLOW groundwater model.
     """
-    paths = model_builder.get_paths(general_options)
+    temp = model_builder.get_paths(general_options)
+    paths = {}
+    for key, val in temp.items():
+        paths[key] = os.path.join(Path(val).parent, model_id, Path(val).name)
 
     # Generate window of model extent
     region = model_builder.shapely_region(general_options["region"])
@@ -122,7 +125,7 @@ def build_model(cellsize, modelname, steady_transient, general_options):
         if "layer" not in v.dims:
             model[k] = v.assign_coords(layer=1)
 
-    imod.write(path=modelname, model=model, name=modelname)
+    imod.write(path='/app/hydro-input/{}-{}'.format(modelname, model_id), model=model, name=modelname)
 
 
 def _fill_np(data, invalid):
