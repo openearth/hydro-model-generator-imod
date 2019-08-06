@@ -1,0 +1,41 @@
+FROM ubuntu:18.04
+# Add and install dependencies.
+ADD requirements.txt requirements.txt
+# Add application code.
+ADD . app/
+
+# # Install requirements
+# RUN apt-get update && apt-get install -y python3.6 python3-pip \
+#     && pip3 install -r requirements.txt \
+#     && apt install -y cmake build-essential git qtbase5-dev libncurses5-dev libqwt-qt5-dev \
+#     libxerces-c-dev libboost-all-dev libgdal-dev python3-numpy python3-docopt wget
+# 
+# # Install iMod
+# RUN apt-get install -y software-properties-common \
+#     && apt-add-repository ppa:ubuntugis/ubuntugis-unstable && apt-get update && apt-get install -y python3.6-gdal
+# # Install gdal
+# RUN apt-get update && apt-get install gdal-bin
+# # python3-gdal python3-numpy
+# RUN git clone https://gitlab.com/deltares/imod/imod-python.git \
+#     && cd imod-python && pip3 install -e .
+
+
+RUN apt-get update \
+    && apt install -yq python3-minimal python3-pip \
+    && pip3 install --upgrade pip \
+    && pip install -r requirements.txt
+RUN apt install -y wget cmake gcc g++ git qtbase5-dev \
+       libboost-all-dev libncurses5-dev libxml2 libxml2-utils libxslt1-dev libxerces-c-dev libqwt-qt5-dev \
+       libpython3.6-dev libpython-dev \
+       gdal-bin gdal-data libgdal-dev libgdal20 \
+       python3-numpy python3-docopt python3-setuptools python3-gdal
+WORKDIR /
+
+
+RUN git clone 'https://gitlab.com/deltares/imod/imod-python.git' \
+    && export CPLUS_INCLUDE_PATH=/usr/include/gdal \
+    && export C_INCLUDE_PATH=/usr/include/gdal \
+    && cd imod-python && pip3 install -e .
+#     && python3 setup.py install
+
+

@@ -1,0 +1,52 @@
+%YAML 1.2
+---
+model: imod
+version: 1.0
+hydro-engine:
+  defaults:
+    function: get-raster
+    source: earth-engine
+    resample: median
+    crs: UTM
+    cell_size: 1000.0
+    region_filter: region
+    catchment_level: 6
+  datasets:
+    -
+      variable: dem
+      path: hydro-engine/iMOD/dem.tif
+    -
+      variable: thickness-NASA
+      path: hydro-engine/iMOD/thickness_NASA.tif
+    -
+      variable: thickness-SoilGrids
+      path: hydro-engine/iMOD/thickness_soilgrids.tif
+    -
+      variable: ate-mask
+      source: users/huite/CoastalUnconsolidatedAquiferArea
+      function: get-features
+      path: hydro-engine/iMOD/ate-mask.json
+    -
+      variable: land
+      source: USDOS/LSIB_SIMPLE/2017
+      function: get-features
+      path: hydro-engine/iMOD/land.json
+    -
+      variable: rivers
+      source: users/huite/RiverBankfullWidthDepth
+      function: get-features
+      path: hydro-engine/iMOD/rivers.json
+
+# region: test.geojson
+# region: {"type":"Point","coordinates":[4.37255859375,51.549751017014195]}
+#region: {"type":"Point","coordinates":[4.295, 51.822]}
+#region: {"type":"Point","coordinates":[4.408,51.209]}
+region: {"type":"Polygon","coordinates": [[[3.977,51.750],[4.391,51.750],[4.391,52.015],[3.977,52.015],[3.977,51.750]]]}
+#region: {"type":"Polygon","coordinates": [[[4.248,51.139],[4.545, 51.139],[4.545,51.308],[4.248,51.308],[4.248,51.139]]]}
+
+...
+---
+
+cellsize: 1000.0
+modelname: iMOD
+steady_transient: steady

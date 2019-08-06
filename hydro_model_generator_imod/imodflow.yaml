@@ -1,8 +1,5 @@
 %YAML 1.2
 ---
-model: imodflow 
-version: 1.0
-
 hydro-engine:
   defaults:
     function: get-raster
@@ -61,6 +58,5 @@ region: test.geojson
 ---
 
 cellsize: 1000.0
-crs: UTM
 modelname: testing
 steady_transient: steady

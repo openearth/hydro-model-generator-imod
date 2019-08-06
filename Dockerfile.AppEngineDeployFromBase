@@ -1,0 +1,33 @@
+FROM imod:base
+
+ADD . /app/
+RUN apt-get install -y vim
+
+# Install hydro-earth
+RUN cd / && git clone --recursive 'https://github.com/openearth/hydro-earth' \
+    && mv /app/config_private.py /hydro-earth/hydroearth/ && mv /app/config_privatekey.json /hydro-earth/hydroearth/ \
+    && cd hydro-earth && python3 setup.py install && pip3 install -r requirements.txt && cd .. \
+    && cp /hydro-earth/hydroearth/frontend/api_tasks.yaml /usr/local/lib/python3.6/dist-packages/hydroearth-0.1.0-py3.6.egg/hydroearth/frontend/
+#     && pip3 install psq
+
+# Install hydro-engine
+RUN cd /app/hydro_model_generator_imod \
+    && git clone 'https://github.com/openearth/hydro-engine'
+
+# Install hydro-model-builder
+RUN apt install -y python3-rtree
+RUN cd /app/hydro_model_generator_imod \
+    && git clone -b refactor --single-branch https://github.com/openearth/hydro-model-builder.git \
+    && cd hydro-model-builder && python3 setup.py install && cd ..
+
+ENV DATASTORE_PROJECT_ID hydro-earth
+# Need to copy over private file
+ENV GOOGLE_APPLICATION_CREDENTIALS=/hydro-earth/hydroearth/config_privatekey.json
+ENV MODELTYPE imod
+ENV LC_ALL C.UTF-8
+ENV LANG C.UTF-8
+
+RUN rm -f /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python
+
+WORKDIR app/hydro_model_generator_imod/
+CMD [ "psqworker", "hydroearth.tasks.worker.models_queue" ]

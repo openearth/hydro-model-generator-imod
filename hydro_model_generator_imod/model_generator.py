@@ -1,83 +1,77 @@
+import json
 import os
 import shutil
 import subprocess
 import zipfile
+from collections import OrderedDict
 from pathlib import Path
+
 import geopandas as gpd
-import imod
-import json
 import numpy as np
 import pyproj
 import rasterio.features
-import shapely
-import shapely.geometry as sg
 import scipy.interpolate
 import scipy.ndimage
-import scipy.spatial
 import scipy.signal
+import scipy.spatial
+import shapely
+import shapely.geometry as sg
 import skimage.morphology
 import xarray as xr
-from collections import OrderedDict
-from hydro_model_builder.model_generator import ModelGenerator
+
+import imod
+from hydro_model_builder import model_builder
 
 
-def get_paths(general_options):
-    # TODO: use schema to validate here?
-    d = {}
-    if "hydro-engine" in general_options:
-        for var in general_options["hydro-engine"]["datasets"]:
-            d[var["variable"]] = var["path"]
-    if "local" in general_options:
-        for var in general_options["local"]["datasets"]:
-            d[var["variable"]] = var["path"]
-    return d
+def rasterize(shapes, like, fill=np.nan, kwargs={}):
+    """
+    Rasterize a list of (geometry, fill_value) tuples onto the given
+    xarray coordinates.
+    """
+
+    # shapes must be an iterable
+    try:
+        iter(shapes)
+    except TypeError:
+        shapes = (shapes,)
+
+    raster = rasterio.features.rasterize(
+        shapes,
+        out_shape=like.shape,
+        fill=fill,
+        transform=imod.util.transform(like),
+        **kwargs,
+    )
+
+    return xr.DataArray(raster, like.coords, like.dims)
 
 
-class ModelGeneratorImodflow(ModelGenerator):
-    def __init__(self):
-        super(ModelGeneratorImodflow, self).__init__()
-
-    def generate_model(self, general_options, options):
-
-        build_model(
-            options["cellsize"],
-            options["modelname"],
-            options["steady_transient"],
-            general_options,
-        )
-
-
-def load_region(region):
-    if isinstance(region, dict):
-        out = sg.shape(region)
-    else:
-        with open(region) as f:
-            js = json.load(f)
-        assert (
-            len(js["features"]) == 1
-        ), "Region definition should contain only one feature."
-        out = sg.shape(js["features"][0]["geometry"])
-    return out
-
-
-def build_model(cellsize, name, steady_transient, general_options):
+def build_model(cellsize, modelname, steady_transient, general_options, model_id):
     """
     Builds and spits out an iMODFLOW groundwater model.
     """
-    paths = get_paths(general_options)
+    temp = model_builder.get_paths(general_options)
+    paths = {}
+    for key, val in temp.items():
+        paths[key] = os.path.join(Path(val).parent, model_id, Path(val).name)
 
-    region = load_region(general_options["region"])
-    dem = xr.open_rasterio(paths["dem"]).squeeze("band").drop("band")
+    # Generate window of model extent
+    region = model_builder.shapely_region(general_options["region"])
+
+    # Start loading the data from a local location
+    dem = xr.open_rasterio(paths["dem"]).squeeze("band", drop=True)
     soilgrids_thickness = (
-        xr.open_rasterio(paths["soilgrids-thickness"]).squeeze("band").drop("band")
+        xr.open_rasterio(paths["thickness-SoilGrids"])
+        .squeeze("band", drop=True)
+        .compute()
     )
-    sediment_thickness = (
-        xr.open_rasterio(paths["sediment-thickness"]).squeeze("band").drop("band")
+    sediment_thickness = xr.open_rasterio(paths["thickness-NASA"]).squeeze(
+        "band", drop=True
     )
-    ate_points = gpd.read_file(paths["ate-thickness"])
-    ate_mask = gpd.read_file(paths["ate-mask"])
-    river_lines = gpd.read_file(paths["rivers"])
-    land_polygons = gpd.read_file(paths["land"])
+
+    crs = {"init": f"epsg:{model_builder.utm_epsg(region=region)}"}
+    river_lines = gpd.read_file(paths["rivers"]).to_crs(crs=crs)
+    land_polygons = gpd.read_file(paths["land"]).to_crs(crs=crs)
 
     # model domains
     # TODO: support polygons, not just squares
@@ -90,12 +84,11 @@ def build_model(cellsize, name, steady_transient, general_options):
     is_bnd = is_land | is_sea
 
     # parameter values
-    ate_grid = ate_points_to_grid(ate_points, ate_mask, "sed_thic_1", dem)
-    top, bot = tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_grid)
+    top, bot = tops_bottoms(dem, soilgrids_thickness, sediment_thickness)
     bnd = xr.full_like(top, is_bnd).fillna(0.0)
 
-    conductivity_polygons = gpd.read_file(paths["aquifer-conductivity"])
-    khv, kvv = conductivity(conductivity_polygons, "logK_Ice_x", bnd)
+    khv = xr.full_like(bnd, 10.0)
+    kvv = xr.full_like(bnd, 3.0)
 
     drn_bot, drn_cond = drainage(dem, cellsize)
 
@@ -132,30 +125,7 @@ def build_model(cellsize, name, steady_transient, general_options):
         if "layer" not in v.dims:
             model[k] = v.assign_coords(layer=1)
 
-    imod.write(path=name, model=model, name=name)
-
-
-def rasterize(shapes, like, fill=np.nan, kwargs={}):
-    """
-    Rasterize a list of (geometry, fill_value) tuples onto the given
-    xarray coordinates.
-    """
-
-    # shapes must be an iterable
-    try:
-        iter(shapes)
-    except TypeError:
-        shapes = (shapes,)
-
-    raster = rasterio.features.rasterize(
-        shapes,
-        out_shape=like.shape,
-        fill=fill,
-        transform=imod.util.transform(like),
-        **kwargs,
-    )
-
-    return xr.DataArray(raster, like.coords, like.dims)
+    imod.write(path='/app/hydro-input/{}-{}'.format(modelname, model_id), model=model, name=modelname)
 
 
 def _fill_np(data, invalid):
@@ -187,7 +157,7 @@ def fill_da(da, invalid=None):
     Returns
     -------
     xarray.DataArray
-        with the same coordinates as the input. 
+        with the same coordinates as the input.
     """
 
     out = xr.full_like(da, np.nan)
@@ -206,7 +176,7 @@ def fill_da(da, invalid=None):
 
 def ate_points_to_grid(ate_points, ate_area, column, like):
     """
-    Smoothes ate_estimate using convolution, triangular kernel, 
+    Smoothes ate_estimate using convolution, triangular kernel,
     with 20% of total extent.
 
     Parameters
@@ -214,7 +184,7 @@ def ate_points_to_grid(ate_points, ate_area, column, like):
     ate_points : geopandas.GeoDataFrame
         Aquifer Thickness Estimate from Zamrsky et al.
 
-    Returns 
+    Returns
     -------
     xarray.DataArray
     """
@@ -241,7 +211,7 @@ def ate_points_to_grid(ate_points, ate_area, column, like):
     return smoothed_grid
 
 
-def tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_thickness):
+def tops_bottoms(dem, soilgrids_thickness, sediment_thickness):
     """
     Creates two aquifer layer geometry (extent, thickness) from parameters.
 
@@ -251,23 +221,24 @@ def tops_bottoms(dem, soilgrids_thickness, sediment_thickness, ate_thickness):
 
     Parameters
     ----------
-    dem : xarray.DataArray 
+    dem : xarray.DataArray
         digital elevation model
-    soilgrids_thickness : xarray.DataArray 
+    soilgrids_thickness : xarray.DataArray
         thickness from soilgrids estimation
-    sediment_thickness : xarray.DataArray 
+    sediment_thickness : xarray.DataArray
         thickness from NASA estimation
     ate_thickness : xarray.DataArray
         Aquifer Thickness Estimate, gridded
-    
+
     Returns
     -------
     top : xr.DataArray
     bot : xr.DataArray
     """
 
+    # TODO: standardize to meters
     thickness = xr.concat(
-        [ate_thickness, soilgrids_thickness / 100.0, sediment_thickness], dim="layer"
+        [soilgrids_thickness / 100.0, sediment_thickness], dim="layer"
     ).max("layer")
     topL1 = dem.copy()
     topL1 = topL1.assign_coords(layer=1)
@@ -309,7 +280,7 @@ def drainage(dem, cellsize):
 
 
 def recharge(like):
-    # assumes 1.0 mm/d recharge
+    # TODO: assumes 1.0 mm/d recharge
     rch = xr.full_like(like, 1.0)
     return rch
 
